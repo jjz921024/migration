@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-.PHONY: check test build clean 
+.PHONY: check test build clean
 default: release
 all: check test build clean
 
@@ -32,9 +32,9 @@ PD_ADDR         ?= 127.0.0.1:2379
 BR_LOCAL_STORE  ?= /tmp/backup_restore_test
 API_VERSION     ?= 1
 CLUSTER_VERSION ?= nightly
-TLS_CA          ?= 
-TLS_CERT        ?= 
-TLS_KEY         ?= 
+TLS_CA          ?=
+TLS_CERT        ?=
+TLS_KEY         ?=
 
 LDFLAGS += -X "github.com/tikv/migration/br/pkg/version/build.ReleaseVersion=$(shell git describe --tags --dirty --always)"
 LDFLAGS += -X "github.com/tikv/migration/br/pkg/version/build.BuildTS=$(shell date -u '+%Y-%m-%d %H:%M:%S')"
@@ -94,6 +94,10 @@ tools/bin/failpoint-ctl: tools/check/go.mod
 build:
 	CGO_ENABLED=1 $(GO) build -tags codes -gcflags "all=-N -l" -ldflags '$(LDFLAGS)' -o $(BR_BIN_PATH) cmd/br/*.go
 
+build_br_txn:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags '-s -w' -o bin/br-txn cmd/br/*.go && \
+	upx -9 -o bin/br-txn-release bin/br-txn
+
 release:
 	CGO_ENABLED=1 $(GO) build -tags codes -ldflags '$(LDFLAGS)' -o $(BR_BIN_PATH) cmd/br/*.go
 
@@ -112,6 +116,6 @@ build/br-test:
 clean:
 	go clean -i ./...
 	rm -rf *.out bin tools/bin
-	rm -rf results.xml 
+	rm -rf results.xml
 	rm -rf br-junit-report.xml $(COVERAGE_DIR)
 	rm -rf $(BR_LOCAL_STORE)
