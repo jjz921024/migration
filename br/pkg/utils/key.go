@@ -152,3 +152,22 @@ func EncodeKeyRange(start, end []byte) *KeyRange {
 	}
 	return &keyRange
 }
+
+// IncreatBytes 返回大端模式下字节数组的下一个值
+func IncreatBytes(b []byte) []byte {
+	nb := make([]byte, len(b))
+	copy(nb, b)
+
+	i := len(nb)-1
+	for ; i >= 0; i-- {
+		nb[i]++
+		if nb[i] != 0 {
+			return nb
+		}
+	}
+
+	if i == -1 {
+		nb = append([]byte{1}, nb...)
+	}
+	return nb
+}

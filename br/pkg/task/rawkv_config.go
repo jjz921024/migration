@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/kvproto/pkg/kvrpcpb"
 	"github.com/spf13/pflag"
 	berrors "github.com/tikv/migration/br/pkg/errors"
@@ -61,7 +60,7 @@ func (cfg *RawKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 	}
 	cfg.GCTTL = gcTTL
 
-	compressionCfg, err := cfg.parseCompressionFlags(flags)
+	compressionCfg, err := ParseCompressionFlags(flags)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -136,41 +135,6 @@ func (cfg *RawKvConfig) parseDstAPIVersion(flags *pflag.FlagSet) error {
 		return errors.Errorf("unsupported dst-api-version: %v. supported values are: %v", originalValue, supportedValues)
 	}
 	return nil
-}
-
-// parseCompressionFlags parses the backup-related flags from the flag set.
-func (cfg *RawKvConfig) parseCompressionFlags(flags *pflag.FlagSet) (*CompressionConfig, error) {
-	compressionStr, err := flags.GetString(flagCompressionType)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	compressionType, err := cfg.parseCompressionType(compressionStr)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	level, err := flags.GetInt32(flagCompressionLevel)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	return &CompressionConfig{
-		CompressionLevel: level,
-		CompressionType:  compressionType,
-	}, nil
-}
-
-func (cfg *RawKvConfig) parseCompressionType(s string) (backuppb.CompressionType, error) {
-	var ct backuppb.CompressionType
-	switch s {
-	case "lz4":
-		ct = backuppb.CompressionType_LZ4
-	case "snappy":
-		ct = backuppb.CompressionType_SNAPPY
-	case "zstd":
-		ct = backuppb.CompressionType_ZSTD
-	default:
-		return backuppb.CompressionType_UNKNOWN, errors.Annotatef(berrors.ErrInvalidArgument, "invalid compression type '%s'", s)
-	}
-	return ct, nil
 }
 
 func (cfg *RawKvConfig) adjustBackupRange(curAPIVersion kvrpcpb.APIVersion) {
