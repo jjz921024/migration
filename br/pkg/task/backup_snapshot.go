@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/pingcap/errors"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
@@ -23,21 +24,22 @@ import (
 )
 
 const (
-	backupFileName = "data_"
-	defaultPrefix  = "all"
+	backupFileName  = "data-"
+	defaultFileSize = 100 * 1024 * 1024
+	defaultPrefix   = "all"
 
 	flagSnapshotTs = "snapshotTs"
-	flagFileSize = "fileSize"
-	flagPrefix   = "prefix"
+	flagFileSize   = "fileSize"
+	flagPrefix     = "prefix"
 )
 
 type TxnKvConfig struct {
 	Config
 	CompressionConfig
 
-	Prefix      string `json:"prefix" toml:"prefix"`
-	SnapshotTs  int64 `json:"snapshotTs" toml:"snapshotTs"`
-	FileSize    int    `json:"fileSize" toml:"fileSize"`
+	Prefix     string `json:"prefix" toml:"prefix"`
+	SnapshotTs int64  `json:"snapshotTs" toml:"snapshotTs"`
+	FileSize   int    `json:"fileSize" toml:"fileSize"`
 }
 
 // DefineSnapshotBackupFlags 定义snapshot子命令相关的选项
@@ -45,7 +47,7 @@ func DefineSnapshotBackupFlags(command *cobra.Command) {
 	command.Flags().String(flagPrefix, defaultPrefix, "backup data which special prefix")
 	command.Flags().String(flagSnapshotTs, "", "snapshot timestamp. Default value is current ts.\n"+
 		"support TSO or datetime, format: '2018-05-11 01:42:23.000'")
-	command.Flags().Int(flagFileSize, 100*1024*1024, "the size of each backup file")
+	command.Flags().Int(flagFileSize, defaultFileSize, "the size of each backup file")
 
 	cobra.MarkFlagRequired(command.Flags(), flagBackupTS)
 }
@@ -54,6 +56,7 @@ func DefineSnapshotBackupFlags(command *cobra.Command) {
 func (cfg *TxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 	var err error
 
+	// 解析快照时间戳
 	ts, err := flags.GetString(flagSnapshotTs)
 	if err != nil {
 		return errors.Trace(err)
@@ -62,26 +65,24 @@ func (cfg *TxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 		return errors.Trace(err)
 	}
 
+	// 解析key前缀, 不指定时默认为all (全量备份)
 	cfg.Prefix, err = flags.GetString(flagPrefix)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
+	// 解析生成备份文件的大小, 默认100MB
 	cfg.FileSize, err = flags.GetInt(flagFileSize)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
+	// 解析压缩相关参数
 	compressionCfg, err := ParseCompressionFlags(flags)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	cfg.CompressionConfig = *compressionCfg
-	level, err := flags.GetInt32(flagCompressionLevel)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	cfg.CompressionLevel = level
 
 	if err = cfg.Config.ParseFromFlags(flags); err != nil {
 		return errors.Trace(err)
@@ -129,7 +130,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 		return errors.Trace(err)
 	}
 
-	// 创建存储客户端
+	// 创建存储
 	s, err := createStorage(ctx, u, cfg)
 	if err != nil {
 		return errors.Trace(err)
@@ -147,6 +148,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 	var writer storage.ExternalFileWriter
 	defer func() {
 		if writer != nil {
+			log.Info("close storage writer")
 			writer.Close(ctx)
 		}
 	}()
@@ -157,20 +159,25 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 			if writer != nil {
 				if err = writer.Close(ctx); err != nil {
 					log.Warn("close file err", zap.Error(err))
-					return err
+					return errors.Trace(err)
 				}
 			}
 
-			path := mkdirBackupPath(u.GetLocal().Path, cli.GetClusterID(), cfg.Prefix, cfg.SnapshotTs, fIdx)
-			writer, err = s.Create(ctx, path)
+			path, err := mkdirBackupPath(u.GetLocal().Path, cli.GetClusterID(), cfg.Prefix, cfg.SnapshotTs, fIdx)
 			if err != nil {
-				log.Warn("create writer error", zap.String("path", path))
-				return err
+				return errors.Trace(err)
+			}
+
+			file := filepath.Join(path, backupFileName+strconv.Itoa(fIdx))
+			writer, err = s.Create(ctx, file)
+			if err != nil {
+				log.Warn("create writer error", zap.String("file", file))
+				return errors.Trace(err)
 			}
 
 			bCnt = 0
 			fIdx++
-			log.Info("output dump file", zap.String("path", path))
+			log.Info("create snapshot file", zap.String("file", file))
 		}
 
 		buf.Write(iter.Key())
@@ -180,8 +187,8 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 
 		i, err := writer.Write(ctx, buf.Bytes())
 		if err != nil {
-			log.Warn("write file err", zap.Error(err))
-			return err
+			log.Warn("write data err", zap.Error(err))
+			return errors.Trace(err)
 		}
 
 		bCnt += i
@@ -196,17 +203,27 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 
 // 在指定backup目录下创建backup子目录
 // 目录名: <clusterID>_<prefix>_<tso>
-func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx int) string {
+func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx int) (string, error) {
+	mask := syscall.Umask(0)
+	defer syscall.Umask(mask)
+
 	_, err := os.Stat(p)
 	if err != nil {
-		_ = os.MkdirAll(p, 644)
+		_ = os.Mkdir(p, 0666)
 	}
 
 	subPath := strconv.FormatUint(clusterID, 10) + "_" + prefix + "_" + strconv.FormatInt(ts, 10)
-	join := filepath.Join(subPath, backupFileName + strconv.Itoa(idx))
-	_ = os.Mkdir(join, 644)
+	path := filepath.Join(p, subPath)
 
-	return join
+	_, err = os.Stat(path)
+	if err != nil {
+		// 父目录要有+w +x权限
+		err = os.Mkdir(path, 0755)
+		if err != nil {
+			return "", err
+		}
+	}
+	return subPath, nil
 }
 
 func createStorage(ctx context.Context, backend *backuppb.StorageBackend, cfg *TxnKvConfig) (storage.ExternalStorage, error) {

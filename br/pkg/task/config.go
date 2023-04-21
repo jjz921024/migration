@@ -214,3 +214,69 @@ func (cfg *Config) adjust() {
 		cfg.ChecksumConcurrency = defaultChecksumConcurrency
 	}
 }
+
+// ParseCompressionFlags 解析压缩相关参数
+func ParseCompressionFlags(flags *pflag.FlagSet) (*CompressionConfig, error) {
+	compressionStr, err := flags.GetString(flagCompressionType)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	compressionType, err := parseCompressionType(compressionStr)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	level, err := flags.GetInt32(flagCompressionLevel)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return &CompressionConfig{
+		CompressionLevel: level,
+		CompressionType:  compressionType,
+	}, nil
+}
+
+func parseCompressionType(s string) (backuppb.CompressionType, error) {
+	var ct backuppb.CompressionType
+	switch s {
+	case "lz4":
+		ct = backuppb.CompressionType_LZ4
+	case "snappy":
+		ct = backuppb.CompressionType_SNAPPY
+	case "zstd":
+		ct = backuppb.CompressionType_ZSTD
+	default:
+		return backuppb.CompressionType_UNKNOWN, errors.Annotatef(berrors.ErrInvalidArgument, "invalid compression type '%s'", s)
+	}
+	return ct, nil
+}
+
+// ParseTSString parse string to unixtime (ms)
+// eg: '400036290571534337' or '2018-05-11 01:42:23.000'
+func ParseTSString(ts string) (int64, error) {
+	if len(ts) == 0 {
+		return 0, nil
+	}
+	t, err := time.Parse("20060102150405000", ts)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return t.UnixMilli(), nil
+
+	/* if tso, err := strconv.ParseUint(ts, 10, 64); err == nil {
+		return tso, nil
+	}
+
+	loc := time.Local
+	sc := &stmtctx.StatementContext{
+		TimeZone: loc,
+	}
+	t, err := types.ParseTime(sc, ts, mysql.TypeTimestamp, types.MaxFsp)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	t1, err := t.GoTime(loc)
+	if err != nil {
+		return 0, errors.Trace(err)
+	}
+	return oracle.GoTimeToTS(t1), nil */
+}
