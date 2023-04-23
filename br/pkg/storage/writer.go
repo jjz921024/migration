@@ -17,7 +17,29 @@ const (
 	NoCompression CompressType = iota
 	// Gzip will compress given bytes in gzip format.
 	Gzip
+	Snappy
+	Lz4
+	Zstd
 )
+
+func (ct CompressType) Name() string {
+	var name string
+	switch ct {
+	case 0 :
+		name = "NoCompression"
+	case 1:
+		name = "Gzip"
+	case 2:
+		name = "Snappy"
+	case 3:
+		name = "Lz4"
+	case 4:
+		name = "Zstd"
+	default:
+		name = "NoCompression"
+	}
+	return name
+}
 
 type flusher interface {
 	Flush() error

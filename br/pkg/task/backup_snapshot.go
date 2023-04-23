@@ -35,11 +35,11 @@ const (
 
 type TxnKvConfig struct {
 	Config
-	CompressionConfig
 
-	Prefix     string `json:"prefix" toml:"prefix"`
-	SnapshotTs int64  `json:"snapshotTs" toml:"snapshotTs"`
-	FileSize   int    `json:"fileSize" toml:"fileSize"`
+	Prefix       string               `json:"prefix" toml:"prefix"`
+	SnapshotTs   int64                `json:"snapshotTs" toml:"snapshotTs"`
+	FileSize     int                  `json:"fileSize" toml:"fileSize"`
+	CompressType storage.CompressType `json:"compressType" toml:"compressType"`
 }
 
 // DefineSnapshotBackupFlags 定义snapshot子命令相关的选项
@@ -78,11 +78,10 @@ func (cfg *TxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 	}
 
 	// 解析压缩相关参数
-	compressionCfg, err := ParseCompressionFlags(flags)
+	cfg.CompressType, err = ParseCompressFlag(flags)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	cfg.CompressionConfig = *compressionCfg
 
 	if err = cfg.Config.ParseFromFlags(flags); err != nil {
 		return errors.Trace(err)
@@ -125,13 +124,13 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 
 	// 解析后端存储配置
 	// eg: file://backup-dir/
-	u, err := storage.ParseBackend(cfg.Storage, &cfg.BackendOptions)
+	backend, err := storage.ParseBackend(cfg.Storage, &cfg.BackendOptions)
 	if err != nil {
 		return errors.Trace(err)
 	}
 
 	// 创建存储
-	s, err := createStorage(ctx, u, cfg)
+	s, err := createStorage(ctx, backend, cfg)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -141,7 +140,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 		zap.String("prefix", cfg.Prefix),
 		zap.Int64("snapshotTs", cfg.SnapshotTs),
 		zap.Int("size", cfg.FileSize),
-		zap.String("compression", cfg.CompressionConfig.CompressionType.String()),
+		zap.String("compression", cfg.CompressType.Name()),
 	)
 
 	bCnt, fIdx := 0, 0
@@ -163,7 +162,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConf
 				}
 			}
 
-			path, err := mkdirBackupPath(u.GetLocal().Path, cli.GetClusterID(), cfg.Prefix, cfg.SnapshotTs, fIdx)
+			path, err := mkdirBackupPath(backend.GetLocal().Path, cli.GetClusterID(), cfg.Prefix, cfg.SnapshotTs, fIdx)
 			if err != nil {
 				return errors.Trace(err)
 			}
@@ -237,6 +236,6 @@ func createStorage(ctx context.Context, backend *backuppb.StorageBackend, cfg *T
 		return nil, errors.Trace(err)
 	}
 
-	storage.WithCompression(s, storage.CompressType(cfg.CompressionConfig.CompressionType))
+	s = storage.WithCompression(s, cfg.CompressType)
 	return s, nil
 }

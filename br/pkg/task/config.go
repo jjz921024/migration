@@ -215,7 +215,32 @@ func (cfg *Config) adjust() {
 	}
 }
 
-// ParseCompressionFlags 解析压缩相关参数
+// ParseCompressFlag 解析压缩相关参数
+func ParseCompressFlag(flags *pflag.FlagSet) (storage.CompressType, error) {
+	str, err := flags.GetString(flagCompressionType)
+	if err != nil {
+		return storage.NoCompression, errors.Trace(err)
+	}
+
+	var ct storage.CompressType
+	switch str {
+	case "none":
+		ct = storage.NoCompression
+	case "gzip":
+		ct = storage.Gzip
+	case "lz4":
+		ct = storage.Lz4
+	case "snappy":
+		ct = storage.Snappy
+	case "zstd":
+		ct = storage.Zstd
+	default:
+		return storage.NoCompression, errors.Annotatef(berrors.ErrInvalidArgument, "invalid compression type '%s'", str)
+	}
+	return ct, nil
+}
+
+// ParseCompressionFlags 解析压缩参数 pb
 func ParseCompressionFlags(flags *pflag.FlagSet) (*CompressionConfig, error) {
 	compressionStr, err := flags.GetString(flagCompressionType)
 	if err != nil {
