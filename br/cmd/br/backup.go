@@ -37,7 +37,7 @@ func runBackupRawCommand(command *cobra.Command, cmdName string) error {
 }
 
 func runBackupSnapshotCommand(command *cobra.Command, cmdName string) error {
-	cfg := task.TxnKvConfig{Config: task.Config{LogProgress: HasLogFile()}}
+	cfg := task.BackupTxnKvConfig{Config: task.Config{LogProgress: HasLogFile()}}
 	if err := cfg.ParseBackupConfigFromFlags(command.Flags()); err != nil {
 		command.SilenceUsage = false
 		return errors.Trace(err)

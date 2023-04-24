@@ -38,6 +38,21 @@ func runRestoreRawCommand(command *cobra.Command, cmdName string) error {
 	return nil
 }
 
+func runRestoreSnapshotCommand(command *cobra.Command, cmdName string) error {
+	cfg := task.RestoreTxnKvConfig{Config: task.Config{LogProgress: HasLogFile()}}
+	if err := cfg.ParseRestoreConfigFromFlags(command.Flags()); err != nil {
+		command.SilenceUsage = false
+		return errors.Trace(err)
+	}
+
+	ctx := GetDefaultContext()
+	if err := task.RunRestoreSnapshot(ctx, gluetikv.Glue{}, cmdName, &cfg); err != nil {
+		log.Error("failed to restore txn kv", zap.Error(err))
+		return errors.Trace(err)
+	}
+	return nil
+}
+
 // NewRestoreCommand returns a restore subcommand.
 func NewRestoreCommand() *cobra.Command {
 	command := &cobra.Command{
@@ -57,6 +72,7 @@ func NewRestoreCommand() *cobra.Command {
 	}
 	command.AddCommand(
 		newRawRestoreCommand(),
+		newSnapshotRestoreCommand(),
 	)
 	task.DefineRestoreFlags(command.PersistentFlags())
 
@@ -74,5 +90,19 @@ func newRawRestoreCommand() *cobra.Command {
 	}
 
 	task.DefineRawRestoreFlags(command)
+	return command
+}
+
+func newSnapshotRestoreCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "snapshot",
+		Short: "restore kv data from snapshot",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return runRestoreSnapshotCommand(command, "Snapshot restore")
+		},
+	}
+
+	task.DefineSnapshotRestoreFlags(command)
 	return command
 }

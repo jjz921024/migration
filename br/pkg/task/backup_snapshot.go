@@ -33,7 +33,7 @@ const (
 	flagPrefix     = "prefix"
 )
 
-type TxnKvConfig struct {
+type BackupTxnKvConfig struct {
 	Config
 
 	Prefix       string               `json:"prefix" toml:"prefix"`
@@ -53,7 +53,7 @@ func DefineSnapshotBackupFlags(command *cobra.Command) {
 }
 
 // ParseBackupConfigFromFlags 解析命令行上的参数, 并赋值给cfg
-func (cfg *TxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
+func (cfg *BackupTxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 	var err error
 
 	// 解析快照时间戳
@@ -90,7 +90,7 @@ func (cfg *TxnKvConfig) ParseBackupConfigFromFlags(flags *pflag.FlagSet) error {
 }
 
 // RunBackupTxn 执行事务kv备份
-func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *TxnKvConfig) error {
+func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxnKvConfig) error {
 	cfg.adjust()
 
 	defer summary.Summary(cmdName)
@@ -225,7 +225,7 @@ func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx in
 	return subPath, nil
 }
 
-func createStorage(ctx context.Context, backend *backuppb.StorageBackend, cfg *TxnKvConfig) (storage.ExternalStorage, error) {
+func createStorage(ctx context.Context, backend *backuppb.StorageBackend, cfg *BackupTxnKvConfig) (storage.ExternalStorage, error) {
 	var err error
 	opts := &storage.ExternalStorageOptions{
 		NoCredentials:   cfg.NoCreds,
