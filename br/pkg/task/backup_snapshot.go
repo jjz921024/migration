@@ -3,13 +3,13 @@ package task
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strconv"
 	"syscall"
 
 	"github.com/pingcap/errors"
-	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -39,7 +39,6 @@ type BackupTxnKvConfig struct {
 	Prefix       string               `json:"prefix" toml:"prefix"`
 	SnapshotTs   int64                `json:"snapshotTs" toml:"snapshotTs"`
 	FileSize     int                  `json:"fileSize" toml:"fileSize"`
-	CompressType storage.CompressType `json:"compressType" toml:"compressType"`
 }
 
 // DefineSnapshotBackupFlags 定义snapshot子命令相关的选项
@@ -102,6 +101,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 	if err != nil {
 		return errors.Trace(err)
 	}
+	defer cli.Close()
 
 	snapshotTso := oracle.ComposeTS(cfg.SnapshotTs, 0)
 	txn, err := cli.Begin(tikv.WithStartTS(snapshotTso))
@@ -130,7 +130,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 	}
 
 	// 创建存储
-	s, err := createStorage(ctx, backend, cfg)
+	s, err := createStorage(ctx, backend, cfg.CompressType)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -152,6 +152,8 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 		}
 	}()
 
+	filePrefix := strconv.FormatUint(cli.GetClusterID(), 10) + "-" + cfg.Prefix + "-" + strconv.FormatInt(cfg.SnapshotTs, 10) + "-"
+
 	var buf bytes.Buffer
 	for iter.Valid() {
 		if writer == nil || bCnt >= cfg.FileSize {
@@ -162,12 +164,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 				}
 			}
 
-			path, err := mkdirBackupPath(backend.GetLocal().Path, cli.GetClusterID(), cfg.Prefix, cfg.SnapshotTs, fIdx)
-			if err != nil {
-				return errors.Trace(err)
-			}
-
-			file := filepath.Join(path, backupFileName+strconv.Itoa(fIdx))
+			file := backupFileName + filePrefix + strconv.Itoa(fIdx)
 			writer, err = s.Create(ctx, file)
 			if err != nil {
 				log.Warn("create writer error", zap.String("file", file))
@@ -179,9 +176,11 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 			log.Info("create snapshot file", zap.String("file", file))
 		}
 
-		buf.Write(iter.Key())
-		buf.WriteByte('\t')
-		buf.Write(iter.Value())
+		//b := bytes.Join([][]byte{iter.Key(), iter.Value()}, []byte{'|'})
+		// base64后不会出现 |
+		buf.Write([]byte(base64.StdEncoding.EncodeToString(iter.Key())))
+		buf.WriteByte('|')
+		buf.Write([]byte(base64.StdEncoding.EncodeToString(iter.Value())))
 		buf.WriteByte('\n')
 
 		i, err := writer.Write(ctx, buf.Bytes())
@@ -202,7 +201,7 @@ func RunBackupTxn(c context.Context, g glue.Glue, cmdName string, cfg *BackupTxn
 
 // 在指定backup目录下创建backup子目录
 // 目录名: <clusterID>_<prefix>_<tso>
-func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx int) (string, error) {
+func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64) (string, error) {
 	mask := syscall.Umask(0)
 	defer syscall.Umask(mask)
 
@@ -211,7 +210,7 @@ func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx in
 		_ = os.Mkdir(p, 0666)
 	}
 
-	subPath := strconv.FormatUint(clusterID, 10) + "_" + prefix + "_" + strconv.FormatInt(ts, 10)
+	subPath := strconv.FormatUint(clusterID, 10) + "-" + prefix + "-" + strconv.FormatInt(ts, 10)
 	path := filepath.Join(p, subPath)
 
 	_, err = os.Stat(path)
@@ -223,19 +222,4 @@ func mkdirBackupPath(p string, clusterID uint64, prefix string, ts int64, idx in
 		}
 	}
 	return subPath, nil
-}
-
-func createStorage(ctx context.Context, backend *backuppb.StorageBackend, cfg *BackupTxnKvConfig) (storage.ExternalStorage, error) {
-	var err error
-	opts := &storage.ExternalStorageOptions{
-		NoCredentials:   cfg.NoCreds,
-		SendCredentials: cfg.SendCreds,
-	}
-	s, err := storage.New(ctx, backend, opts)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-
-	s = storage.WithCompression(s, cfg.CompressType)
-	return s, nil
 }

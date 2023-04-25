@@ -66,6 +66,8 @@ type Config struct {
 	GRPCKeepaliveTimeout time.Duration `json:"grpc-keepalive-timeout" toml:"grpc-keepalive-timeout"`
 
 	CipherInfo backuppb.CipherInfo `json:"-" toml:"-"`
+
+	CompressType storage.CompressType `json:"compressType" toml:"compressType"`
 }
 
 func (cfg *Config) parseCipherInfo(flags *pflag.FlagSet) error {

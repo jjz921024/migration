@@ -3,8 +3,12 @@
 package task
 
 import (
+	"context"
+
+	"github.com/pingcap/errors"
 	backuppb "github.com/pingcap/kvproto/pkg/brpb"
 	"github.com/spf13/pflag"
+	"github.com/tikv/migration/br/pkg/storage"
 )
 
 const (
@@ -67,4 +71,20 @@ func DefineBackupFlags(flags *pflag.FlagSet) {
 	// but will generate v1 meta due to this flag is false. the behaviour is as same as v4.0.15, v4.0.16.
 	// finally v4.0.17 will set this flag to true, and generate v2 meta.
 	_ = flags.MarkHidden(flagUseBackupMetaV2)
+}
+
+func createStorage(ctx context.Context, backend *backuppb.StorageBackend, ct storage.CompressType) (storage.ExternalStorage, error) {
+	var err error
+	opts := &storage.ExternalStorageOptions{
+		NoCredentials:   false,
+		SendCredentials: false,
+	}
+
+	s, err := storage.New(ctx, backend, opts)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+
+	s = storage.WithCompression(s, ct)
+	return s, nil
 }
